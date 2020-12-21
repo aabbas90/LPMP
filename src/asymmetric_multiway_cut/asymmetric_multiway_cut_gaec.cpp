@@ -19,8 +19,8 @@ namespace LPMP {
             max_cost = std::max(max_cost, e.cost[0]);
 
         }
-        std::cout << "minimum cost in edges: " << min_cost << "\n";
-        std::cout << "maximum cost in edges: " << max_cost << "\n";
+        // std::cout << "minimum cost in edges: " << min_cost << "\n";
+        // std::cout << "maximum cost in edges: " << max_cost << "\n";
         const size_t nr_nodes = instance.nr_nodes();
         const size_t nr_edges = instance.nr_edges();
         const size_t nr_labels = instance.nr_labels();
@@ -108,9 +108,9 @@ namespace LPMP {
                 Q.push(edge_type_q{e[0], e[1], join_cost, join_label, 0});
         }
 
-        std::cout << "min join cost initial = " << min_join_cost << "\n";
-        std::cout << "max join cost initial = " << max_join_cost << "\n";
-        std::cout << "size of Q = " << Q.size() << "\n";
+        // std::cout << "min join cost initial = " << min_join_cost << "\n";
+        // std::cout << "max join cost initial = " << max_join_cost << "\n";
+        // std::cout << "size of Q = " << Q.size() << "\n";
 
         while(!Q.empty()) {
             const edge_type_q e_q = Q.top();
