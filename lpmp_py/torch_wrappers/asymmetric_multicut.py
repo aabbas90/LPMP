@@ -126,7 +126,7 @@ class AsymmetricMultiCutSolver(torch.autograd.Function):
             edge_indices = ctx.edge_indices
 
             if params['finite_diff_order'] == 1: 
-                node_labels_forward, edge_labels_forward = AsymmetricMultiCutSolver.solve_amc_batch(node_costs_forward, edge_costs_forward, edge_indices)
+                node_labels_forward, edge_labels_forward = AsymmetricMultiCutSolver.solve_amc_batch(node_costs_forward, edge_costs_forward, edge_indices, params['edge_distances'])
                 grad_node_costs = (node_labels_forward - node_labels) / (lambda_val + epsilon_val)
                 grad_edge_costs = (edge_labels_forward - edge_labels) / (lambda_val + epsilon_val)
             
@@ -137,7 +137,7 @@ class AsymmetricMultiCutSolver(torch.autograd.Function):
                 node_costs_combined = torch.cat((node_costs_forward, node_costs_backward), 0)
                 edge_costs_combined = torch.cat((edge_costs_forward, edge_costs_backward), 0)
 
-                node_labels_combined, edge_labels_combined = AsymmetricMultiCutSolver.solve_amc_batch(node_costs_combined, edge_costs_combined, edge_indices)
+                node_labels_combined, edge_labels_combined = AsymmetricMultiCutSolver.solve_amc_batch(node_costs_combined, edge_costs_combined, edge_indices, params['edge_distances'])
 
                 node_labels_forward = node_labels_combined[:node_costs_forward.shape[0], ::]
                 node_labels_backward = node_labels_combined[node_costs_forward.shape[0]:, ::]
