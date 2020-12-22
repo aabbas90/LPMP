@@ -30,7 +30,7 @@ class AsymmetricMultiCutSolver(torch.autograd.Function):
         col_aff = edge_costs_cpu[1, :, :-1]
         edge_costs_cpu = np.concatenate((row_aff.flatten(), col_aff.flatten()), 0)
         edge_list = list(zip(edge_indices[:, 0], edge_indices[:, 1], edge_costs_cpu))
-        node_labels, edge_labels_1d, solver_cost = amc_solver(node_costs, edge_list)
+        node_labels, _, edge_labels_1d, solver_cost = amc_solver(node_costs, edge_list)
         edge_labels = np.zeros(edge_costs.shape)
         edge_labels[0, :-1, :] = edge_labels_1d[:row_aff.size].reshape(row_aff.shape)
         edge_labels[1, :, :-1] = edge_labels_1d[row_aff.size:].reshape(col_aff.shape)

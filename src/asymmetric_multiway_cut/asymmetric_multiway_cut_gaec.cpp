@@ -189,8 +189,8 @@ namespace LPMP {
             const size_t c = partition.find(i);
             assert(node_labels[c] < nr_labels);
             labeling.node_labels.push_back(node_labels[c]);
+            labeling.node_connected_components_ids.push_back(c);
         }
-
         assert(instance.feasible(labeling));
         return labeling;
     }

@@ -41,7 +41,8 @@ class AsymmetricMultiCutSolver(torch.autograd.Function):
         node_labels_img_shape = node_costs_cpu.shape[1:]
         node_labels_num_pixels = np.prod(node_labels_img_shape)
         node_costs_cpu = node_costs_cpu.transpose(1, 2, 0).reshape(node_labels_num_pixels, num_classes)
-        node_labels, edge_labels_1d, solver_cost = amc_solver(node_costs_cpu, edge_list)
+        node_labels, node_instance_ids, edge_labels_1d, solver_cost = amc_solver(node_costs_cpu, edge_list)
+        node_instance_ids = node_instance_ids.reshape(node_labels_img_shape)
         node_labels = node_labels.transpose().reshape((num_classes, node_labels_img_shape[0], node_labels_img_shape[1]))
         edge_labels = np.zeros(edge_costs_cpu.shape)
         start_index_1d = 0
@@ -58,7 +59,7 @@ class AsymmetricMultiCutSolver(torch.autograd.Function):
             edge_labels[2 * i + 1, :, :-e_d] = edge_labels_1d[start_index_1d:end_index_1d].reshape(output_shape)
             start_index_1d += current_numel
         
-        return_dict[batch_index] = (node_labels, edge_labels)
+        return_dict[batch_index] = (node_labels, node_instance_ids, edge_labels)
 
     @staticmethod
     def solve_amc_batch(node_costs_batch, edge_costs_batch, edge_indices, edge_distances):
@@ -66,6 +67,7 @@ class AsymmetricMultiCutSolver(torch.autograd.Function):
         node_costs_batch_cpu = node_costs_batch.cpu().detach().numpy()
         edge_costs_batch_cpu = edge_costs_batch.cpu().detach().numpy()
         node_labels_batch = np.zeros_like(node_costs_batch_cpu)
+        node_instance_ids_batch = np.zeros((node_costs_batch_cpu.shape[0], 1, node_costs_batch_cpu.shape[2], node_costs_batch_cpu.shape[3]))
         edge_labels_batch = np.zeros_like(edge_costs_batch_cpu)
 
         batch_size = node_costs_batch.shape[0]
@@ -82,10 +84,11 @@ class AsymmetricMultiCutSolver(torch.autograd.Function):
             worker.join()
         
         for b in sorted(return_dict.keys()):
-            node_labels_batch[b, ::], edge_labels_batch[b, ::] = return_dict[b]
+            node_labels_batch[b, ::], node_instance_ids_batch[b, 0, ::], edge_labels_batch[b, ::] = return_dict[b]
         node_labels_batch = torch.from_numpy(node_labels_batch).to(torch.float32).to(device)
         edge_labels_batch = torch.from_numpy(edge_labels_batch).to(torch.float32).to(device)
-        return node_labels_batch, edge_labels_batch 
+        node_instance_ids_batch = torch.from_numpy(node_instance_ids_batch).to(torch.float32).to(device)
+        return node_labels_batch, node_instance_ids_batch, edge_labels_batch 
 
     @staticmethod
     def forward(ctx, node_costs, edge_costs, edge_indices, params):
@@ -93,20 +96,23 @@ class AsymmetricMultiCutSolver(torch.autograd.Function):
         @param ctx: context for backpropagation
         """
         device = node_costs.device
-        node_labels, edge_labels = AsymmetricMultiCutSolver.solve_amc_batch(node_costs, edge_costs, edge_indices, params['edge_distances'])
+        node_labels, node_instance_ids, edge_labels = AsymmetricMultiCutSolver.solve_amc_batch(node_costs, edge_costs, edge_indices, params['edge_distances'])
         ctx.params = params
         ctx.edge_indices = edge_indices
         ctx.save_for_backward(node_costs, node_labels, edge_costs, edge_labels)
-        return node_labels, edge_labels
+        ctx.mark_non_differentiable(node_instance_ids)
+        return node_labels, edge_labels, node_instance_ids
 
     @staticmethod
-    def backward(ctx, grad_node_labels, grad_edge_labels):
+    def backward(ctx, grad_node_labels, grad_edge_labels, grad_node_instance_ids):
         """
         Backward pass computation.
 
         @param ctx: context from the forward pass
         @param grad_node_labels: "dL / d node_labels"
         @param grad_edge_labels: "dL / d edge_labels" 
+        @param grad_node_instance_ids: Just a placeholder.
+            does not contain meaningful value as node_instance_ids is non-differentiable. 
         @return: gradient dL / node_costs, dL / edge_costs
         """
         params = ctx.params
@@ -126,7 +132,7 @@ class AsymmetricMultiCutSolver(torch.autograd.Function):
             edge_indices = ctx.edge_indices
 
             if params['finite_diff_order'] == 1: 
-                node_labels_forward, edge_labels_forward = AsymmetricMultiCutSolver.solve_amc_batch(node_costs_forward, edge_costs_forward, edge_indices, params['edge_distances'])
+                node_labels_forward, _, edge_labels_forward = AsymmetricMultiCutSolver.solve_amc_batch(node_costs_forward, edge_costs_forward, edge_indices, params['edge_distances'])
                 grad_node_costs = (node_labels_forward - node_labels) / (lambda_val + epsilon_val)
                 grad_edge_costs = (edge_labels_forward - edge_labels) / (lambda_val + epsilon_val)
             
@@ -137,7 +143,7 @@ class AsymmetricMultiCutSolver(torch.autograd.Function):
                 node_costs_combined = torch.cat((node_costs_forward, node_costs_backward), 0)
                 edge_costs_combined = torch.cat((edge_costs_forward, edge_costs_backward), 0)
 
-                node_labels_combined, edge_labels_combined = AsymmetricMultiCutSolver.solve_amc_batch(node_costs_combined, edge_costs_combined, edge_indices, params['edge_distances'])
+                node_labels_combined, _, edge_labels_combined = AsymmetricMultiCutSolver.solve_amc_batch(node_costs_combined, edge_costs_combined, edge_indices, params['edge_distances'])
 
                 node_labels_forward = node_labels_combined[:node_costs_forward.shape[0], ::]
                 node_labels_backward = node_labels_combined[node_costs_forward.shape[0]:, ::]
@@ -191,5 +197,5 @@ class AsymmetricMulticutModule(torch.nn.Module):
         if self.image_size is None or edge_costs_batch[0, 0].shape != self.image_size:
             self.image_size = edge_costs_batch[0, 0].shape
             self.edge_indices = get_edge_indices(self.image_size, self.edge_distances)
-        node_labels_batch, edge_labels_batch = self.solver.apply(node_costs_batch, edge_costs_batch, self.edge_indices, self.params)
-        return node_labels_batch, edge_labels_batch
+        node_labels_batch, edge_labels_batch, node_instance_ids_batch = self.solver.apply(node_costs_batch, edge_costs_batch, self.edge_indices, self.params)
+        return node_labels_batch, edge_labels_batch, node_instance_ids_batch
