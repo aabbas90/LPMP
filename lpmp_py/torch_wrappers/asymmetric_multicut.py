@@ -153,6 +153,41 @@ class AsymmetricMultiCutSolver(torch.autograd.Function):
                 edge_labels_forward = edge_labels_combined[:edge_costs_forward.shape[0], ::]
                 edge_labels_backward = edge_labels_combined[edge_costs_forward.shape[0]:, ::]
                 grad_edge_costs = (edge_labels_forward - edge_labels_backward) / (2.0 * lambda_val + epsilon_val)
+
+            elif params['finite_diff_order'] == 4:
+                node_costs_double_forward = node_costs + 2 * lambda_val * grad_node_labels
+                node_costs_backward = node_costs - lambda_val * grad_node_labels
+                node_costs_double_backward = node_costs - 2 * lambda_val * grad_node_labels
+
+                node_costs_combined = torch.cat((node_costs_double_forward, node_costs_forward, node_costs_backward, node_costs_double_backward), 0)
+
+                edge_costs_double_forward = edge_costs + 2 * lambda_val * grad_edge_labels
+                edge_costs_backward = edge_costs - lambda_val * grad_edge_labels
+                edge_costs_double_backward = edge_costs - 2 * lambda_val * grad_edge_labels
+
+                edge_costs_combined = torch.cat((edge_costs_double_forward, edge_costs_forward, edge_costs_backward, edge_costs_double_backward), 0)
+                node_labels_combined, _, edge_labels_combined = AsymmetricMultiCutSolver.solve_amc_batch(node_costs_combined, edge_costs_combined, edge_indices, params['edge_distances'])
+
+                shape_each_eval = node_costs_double_forward.shape[0]
+                node_labels_double_forward = node_labels_combined[:shape_each_eval, ::]
+                node_labels_forward = node_labels_combined[shape_each_eval:2 * shape_each_eval, ::]
+                node_labels_backward = node_labels_combined[2 * shape_each_eval:3 * shape_each_eval, ::]
+                node_labels_double_backward = node_labels_combined[3 * shape_each_eval:, ::]
+
+                grad_node_costs = (-node_labels_double_forward +
+                                    8 * node_labels_forward - 
+                                    8 * node_labels_backward +
+                                    node_labels_double_backward) / (12.0 * lambda_val + epsilon_val)
+
+                edge_labels_double_forward = edge_labels_combined[:shape_each_eval, ::]
+                edge_labels_forward = edge_labels_combined[shape_each_eval:2 * shape_each_eval, ::]
+                edge_labels_backward = edge_labels_combined[2 * shape_each_eval:3 * shape_each_eval, ::]
+                edge_labels_double_backward = edge_labels_combined[3 * shape_each_eval:, ::]
+
+                grad_edge_costs = (-edge_labels_double_forward +
+                                    8 * edge_labels_forward - 
+                                    8 * edge_labels_backward +
+                                    edge_labels_double_backward) / (12.0 * lambda_val + epsilon_val)
                 # import pdb; pdb.set_trace()
                 # import matplotlib.pyplot as plt 
                 # plt.imshow(grad_edge_labels[0, 0, :, :].squeeze().detach().cpu())
