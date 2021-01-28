@@ -141,6 +141,9 @@ public:
     }
 
 
+    const double& getMustCutPenalty()const{
+        return mustCutPenalty;
+    }
 
 
 //	void setMaxTimeLifted(size_t maxTimeLifted) {
@@ -149,7 +152,7 @@ public:
 
 
 	size_t getMaxTimeGapComplete() const {
-		return maxTimeGapComplete;
+        return maxTimeGapComplete;
 	}
 
 
@@ -176,13 +179,28 @@ public:
 
 	//ConfigDisjoint<>& operator=(const ConfigDisjoint<>&);
 
+
+    size_t getTightenMaxEdgeUsage() const{
+        return tighteningMaxEdgeUsage;
+    }
+
+    double getTightenMinImprovement() const{
+        return tighteningMinImprovement;
+    }
+
+
     bool isAllBaseZero()const {
         return allBaseToZero;
     }
 
-    bool isKeepRedundantLifted()const{
-        return keepRedundantLifted;
+    bool isBaseCoverdWithLifted()const{
+        return coverBaseWithLifted;
     }
+
+    bool isMustCutMissing()const{
+        return missingAsMustCut;
+    }
+
 
 private:
     LdpParameters<T>(const LdpParameters<T>&);
@@ -228,8 +246,16 @@ private:
 
      std::stringstream controlOutput;
 
+
+     double tighteningMinImprovement;
+     size_t tighteningMaxEdgeUsage;
+
+
      bool allBaseToZero;
-     bool keepRedundantLifted;
+     bool coverBaseWithLifted;
+
+     bool missingAsMustCut;
+     double mustCutPenalty;
 
 };
 
@@ -318,13 +344,13 @@ inline void LdpParameters<T>::init(std::map<std::string,std::string>& parameters
     writeControlOutput();
 
 
-    if(parameters.count("KEEP_REDUNDANT_LIFTED")>0){
-        keepRedundantLifted=std::stoi(parameters["KEEP_REDUNDANT_LIFTED"]);
+    if(parameters.count("COVER_BASE_WITH_LIFTED")>0){
+        coverBaseWithLifted=std::stoi(parameters["COVER_BASE_WITH_LIFTED"]);
     }
     else{
-        keepRedundantLifted=1;
+        coverBaseWithLifted=1;
     }
-    controlOutput<<"keep redundant lifted "<<keepRedundantLifted<<std::endl;
+    controlOutput<<"cover base with lifted "<<coverBaseWithLifted<<std::endl;
     writeControlOutput();
 
 
@@ -358,7 +384,7 @@ inline void LdpParameters<T>::init(std::map<std::string,std::string>& parameters
 
         minTimeFrame=1;
     }
-    controlOutput<<"min time frame "<<maxTimeFrame<<std::endl;
+    controlOutput<<"min time frame "<<minTimeFrame<<std::endl;
     writeControlOutput();
 
 
@@ -468,12 +494,15 @@ inline void LdpParameters<T>::init(std::map<std::string,std::string>& parameters
 
 
 
+    maxTimeGapComplete=0;
     if(parameters.count("MAX_TIMEGAP_COMPLETE")>0){
         maxTimeGapComplete=std::stoul(parameters["MAX_TIMEGAP_COMPLETE"]);
     }
-    else{
-        maxTimeGapComplete=maxTimeFrame;
-    }
+    maxTimeGapComplete=std::max(maxTimeGapComplete,maxTimeLifted);
+    maxTimeGapComplete=std::max(maxTimeGapComplete,maxTimeBase);
+//    else{
+//        maxTimeGapComplete=maxTimeFrame;
+//    }
     controlOutput<<"max time gap complete "<<maxTimeGapComplete<<std::endl;
 
     if(parameters.count("USE_ADAPTIVE_THRESHOLDS")){
@@ -484,7 +513,43 @@ inline void LdpParameters<T>::init(std::map<std::string,std::string>& parameters
     }
      controlOutput<<"adaptive thresholds "<<useAdaptiveThresholds<<std::endl;
 
-    writeControlOutput();
+
+     if(parameters.count("TIGHT_MIN_IMPROVEMENT")>0){
+         tighteningMinImprovement=std::stod(parameters["TIGHT_MIN_IMPROVEMENT"]);
+     }
+     else{
+         tighteningMinImprovement=0.00001;
+     }
+     assert(tighteningMinImprovement>=0);
+     controlOutput<<"minimal improvement for tightening "<<tighteningMinImprovement<<std::endl;
+
+     if(parameters.count("TIGHT_MAX_EDGE_USAGE")>0){
+         tighteningMaxEdgeUsage=std::stoi(parameters["TIGHT_MAX_EDGE_USAGE"]);
+     }
+     else{
+         tighteningMaxEdgeUsage=4;
+     }
+     controlOutput<<"maximal edge usage for tightening "<<tighteningMaxEdgeUsage<<std::endl;
+
+     if(parameters.count("MISSING_AS_MUST_CUT")>0){
+         missingAsMustCut=std::stoi(parameters["MISSING_AS_MUST_CUT"]);
+     }
+     else{
+         missingAsMustCut=0;
+     }
+     controlOutput<<"missing edges as must cut "<<missingAsMustCut<<std::endl;
+
+
+     if(parameters.count("MUST_CUT_PENALTY")>0){
+         mustCutPenalty=std::stod(parameters["MUST_CUT_PENALTY"]);
+     }
+     else{
+         mustCutPenalty=100.0;
+     }
+     controlOutput<<"must cut penalty "<<mustCutPenalty<<std::endl;
+
+
+     writeControlOutput();
 
 
 }
