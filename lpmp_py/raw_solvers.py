@@ -9,7 +9,7 @@ def amc_solver(node_costs, edge_list):
     amc_sol = amc.asymmetric_multiway_cut_gaec(amc_instance)
     edge_labels, node_labels, node_instance_ids = amc_instance.result_mask(amc_sol)
     solver_cost = amc_instance.evaluate(amc_sol)
-    return node_labels, node_instance_ids, edge_labels, solver_cost
+    return node_labels.astype(np.uint8), node_instance_ids, edge_labels.astype(np.uint8), solver_cost
 
 def gm_solver(costs, quadratic_costs, edges_left, edges_right, solver_params, verbose=False):
     """
