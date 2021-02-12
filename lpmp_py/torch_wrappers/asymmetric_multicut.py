@@ -137,9 +137,12 @@ def solve_amc(batch_index, node_costs_cpu, edge_costs_cpu, edge_indices, edge_di
 
 def solve_amc_batch(node_costs_batch, edge_costs_batch, edge_indices, edge_distances, edge_sampling_intervals, thing_ids = None, compute_pan_one_hot = False):
     panoptic_ids_one_hot = None
-    device = node_costs_batch.device
-    batch_size = node_costs_batch.shape[0]
-    node_costs_batch_cpu = node_costs_batch.cpu().detach().numpy()
+    if isinstance(node_costs_batch, torch.Tensor):
+        node_costs_batch = torch.unbind(node_costs_batch, dim=0)
+
+    device = node_costs_batch[0].device
+    batch_size = len(node_costs_batch)
+    node_costs_batch_cpu = [n.cpu().detach().numpy() for n in node_costs_batch]
     edge_costs_batch_cpu = []
     for b in range(batch_size):
         current_batch_edge_costs = []
@@ -150,14 +153,14 @@ def solve_amc_batch(node_costs_batch, edge_costs_batch, edge_indices, edge_dista
     if batch_size == 1:
         b = 0
         return_dict = {}
-        solve_amc(b, node_costs_batch_cpu[b, ::], edge_costs_batch_cpu[b], edge_indices, edge_distances, edge_sampling_intervals, compute_pan_one_hot, thing_ids, return_dict)
+        solve_amc(b, node_costs_batch_cpu[b], edge_costs_batch_cpu[b], edge_indices, edge_distances, edge_sampling_intervals, compute_pan_one_hot, thing_ids, return_dict)
     else:
         ctx = mp.get_context('fork')
         manager = ctx.Manager()
         return_dict = manager.dict()
         workers = []
         for b in range(batch_size):
-            worker = ctx.Process(target=solve_amc, args=(b, node_costs_batch_cpu[b, ::], edge_costs_batch_cpu[b], edge_indices, edge_distances, edge_sampling_intervals, compute_pan_one_hot, thing_ids, return_dict))
+            worker = ctx.Process(target=solve_amc, args=(b, node_costs_batch_cpu[b], edge_costs_batch_cpu[b], edge_indices, edge_distances, edge_sampling_intervals, compute_pan_one_hot, thing_ids, return_dict))
             workers.append(worker)
         [w.start() for w in workers]  
         for worker in workers:
@@ -167,13 +170,14 @@ def solve_amc_batch(node_costs_batch, edge_costs_batch, edge_indices, edge_dista
                 print(f"ERROR: There was an error during multiprocessing with error code: {worker.exitcode}, in worker: {worker.name}. Possibly too many parallel tasks!")
                 sys.exit(0)
 
-    node_labels_batch = np.zeros_like(node_costs_batch_cpu, dtype = np.uint8)
-    node_instance_ids_batch = np.zeros((node_costs_batch_cpu.shape[0], 1, node_costs_batch_cpu.shape[2], node_costs_batch_cpu.shape[3]), dtype=np.int32)
+    node_labels_batch = []
+    node_instance_ids_batch = np.zeros((batch_size, 1, node_costs_batch_cpu[0].shape[1], node_costs_batch_cpu[0].shape[2]), dtype=np.int32)
     edge_labels_batch = []  
     panoptic_ids_one_hot_batch = []
 
     for b in sorted(return_dict.keys()):
-        node_labels_batch[b, ::], node_instance_ids_batch[b, 0, ::], current_edge_labels, panoptic_ids_one_hot = return_dict[b]
+        node_labels, node_instance_ids_batch[b, 0, ::], current_edge_labels, panoptic_ids_one_hot = return_dict[b]
+        node_labels_batch.append(torch.from_numpy(node_labels))
         edge_labels_batch.append(current_edge_labels)
         assert(len(current_edge_labels) == len(edge_distances))
         if compute_pan_one_hot:
@@ -187,14 +191,12 @@ def solve_amc_batch(node_costs_batch, edge_costs_batch, edge_indices, edge_dista
         
         edge_labels_batch_reorg.append(torch.from_numpy(np.stack(current_distance_edge_labels, 0))) #.to(torch.float32).to(device))
 
-    node_labels_batch = torch.from_numpy(node_labels_batch) #.to(torch.float32).to(device)
     node_instance_ids_batch = torch.from_numpy(node_instance_ids_batch) #.to(torch.float32).to(device)
     return node_labels_batch, node_instance_ids_batch, tuple(edge_labels_batch_reorg), tuple(panoptic_ids_one_hot_batch) 
 
 class AsymmetricMultiCutSolver(torch.autograd.Function):
     @staticmethod
     def forward(ctx, *inputs): #ctx, edge_indices, params, node_costs, edge_costs):
-        #TODOAA: Check this:
         ctx.set_materialize_grads(False)
         edge_indices = inputs[0]
         params = inputs[1]
@@ -202,24 +204,19 @@ class AsymmetricMultiCutSolver(torch.autograd.Function):
         edge_costs = inputs[3:]
 
         node_labels, node_instance_ids, edge_labels, panoptic_ids_one_hot = solve_amc_batch(node_costs, edge_costs, edge_indices, params['edge_distances'], params['edge_sampling_intervals'], params['thing_ids'], params['instance_preturbation'])
+        node_labels = torch.stack(node_labels, 0)
         ctx.params = params
+        ctx.device = node_costs.device
         ctx.edge_indices = edge_indices
-        items_to_save = tuple([])
         out = tuple([])
         if params['instance_preturbation']:
-            items_to_save += panoptic_ids_one_hot
             panoptic_ids_one_hot = tuple([p.to(torch.float16) for p in panoptic_ids_one_hot])
+            ctx.mark_non_differentiable(panoptic_ids_one_hot)
             out += panoptic_ids_one_hot
-            [ctx.mark_non_differentiable(el) for el in edge_labels]
-        else:
-            edge_labels = tuple([e.to(torch.float16) for e in edge_labels])
 
-        items_to_save = (node_costs, ) + (node_labels, ) + edge_costs + edge_labels + items_to_save
-        out = (node_labels.to(torch.float16), ) + (node_instance_ids, ) + edge_labels + out
-        ctx.save_for_backward(*items_to_save)
+        edge_labels = tuple([e.to(torch.float16) for e in edge_labels])
         ctx.mark_non_differentiable(node_instance_ids)
-        print("AMC FORWARD")
-        print(panoptic_ids_one_hot[0].shape)
+        out = (node_labels.to(torch.float16), ) + (node_instance_ids, ) + edge_labels + out
         return out
 
     @staticmethod
@@ -239,68 +236,84 @@ class AsymmetricMultiCutSolver(torch.autograd.Function):
         ctx = grad_inputs[0]
         params = ctx.params
         num_edge_arrays = len(params['edge_distances'])
-        grad_node_labels = grad_inputs[1]
+        # print(f"GRAD MEAN: {grad_node_costs.mean().item()}")
+        grad_node_costs = grad_inputs[1].to(ctx.device)
+        # print(f"GRAD MEAN: {grad_node_costs.mean().item()}")
         # print(f"mean: {grad_node_labels.mean().item()}, var: {grad_node_labels.var().item()}, max: {grad_node_labels.max().item()}, min: {grad_node_labels.min().item()}")
-        grad_edge_labels = grad_inputs[3:3 + num_edge_arrays]
-        if params['instance_preturbation']:
-            grad_panoptic_ids_one_hot = grad_inputs[3 + num_edge_arrays:]
-            print("AMC BACKWARD")
-            print(grad_panoptic_ids_one_hot[0].shape)
-            for i in range(grad_panoptic_ids_one_hot[0].shape[0]):
-                print(f"{i}: abs: {torch.abs(grad_panoptic_ids_one_hot[0][i, ::]).sum()}")
+        grad_edge_costs = [g.to(ctx.device) for g in grad_inputs[3:3 + num_edge_arrays]]
 
-        if params['finite_diff_order'] == 0: 
-            # Straight-through estimator trick: Backward pass as identity.
-            grad_node_costs = -1.0 * grad_node_labels
-            grad_edge_costs = [-1.0 * g for g in grad_edge_labels]
-        else:
-            saved_items = ctx.saved_tensors
-            idx = 0
-            node_costs = saved_items[idx]; idx += 1
-            node_labels = saved_items[idx]; idx += 1
-            edge_costs = saved_items[idx:idx + num_edge_arrays]; idx += num_edge_arrays
-            edge_labels = saved_items[idx:idx + num_edge_arrays:]; idx += num_edge_arrays
-            panoptic_ids_one_hot = None
-            if params['instance_preturbation']:
-                panoptic_ids_one_hot = saved_items[idx:]
-            lambda_val = params["lambda_val"]
-            epsilon_val = 1e-8
-            assert grad_node_labels.shape == node_costs.shape
-            assert grad_edge_labels is None or (grad_edge_labels[0].shape == edge_costs[0].shape and len(grad_edge_labels) == len(edge_costs))
+        # if params['instance_preturbation']:
+        #     grad_panoptic_ids_one_hot = grad_inputs[3 + num_edge_arrays:]
+        #     print("AMC BACKWARD")
+        #     print(grad_panoptic_ids_one_hot[0].shape)
+        #     import matplotlib.pyplot as plt 
+        #     for i in range(grad_panoptic_ids_one_hot[0].shape[0]):
+        #         unique_values = np.unique(grad_panoptic_ids_one_hot[0][i, ::].squeeze().to(torch.float32).numpy())
+        #         print(f"{i}: abs: {torch.abs(grad_panoptic_ids_one_hot[0][i, ::]).sum()}, unique vals: {unique_values}")
+        #         print(grad_panoptic_ids_one_hot[0][i, ::].squeeze().dtype)
+        #         # fig = plt.figure()
+        #         # plt.imshow(grad_panoptic_ids_one_hot[0][i, ::].squeeze().to(torch.float32), cmap = 'gray', interpolation = 'nearest')
+        #         # print()
+        #         # plt.title(f"Number of unique values: {len(unique_values)}")
+        #         # plt.colorbar()
+        #         # plt.savefig('grad_' + str(i) +'.png')
+        #         # plt.close()
+        #TODOAA: Check -1
+        # grad_node_costs = -1.0 * grad_node_labels
+        # grad_edge_costs = [-1.0 * g for g in grad_edge_labels]
 
-            node_costs_forward = node_costs + lambda_val * grad_node_labels
-            edge_costs_forward = [e_c + lambda_val * g_e_l for (e_c, g_e_l) in zip(edge_costs, grad_edge_labels)]
-            edge_indices = ctx.edge_indices
+        # if params['finite_diff_order'] == 0: 
+        #     # Straight-through estimator trick: Backward pass as identity.
+        #     grad_node_costs = -1.0 * grad_node_labels
+        #     grad_edge_costs = [-1.0 * g for g in grad_edge_labels]
+        # else:
+        #     saved_items = ctx.saved_tensors
+        #     idx = 0
+        #     node_costs = saved_items[idx]; idx += 1
+        #     node_labels = saved_items[idx]; idx += 1
+        #     edge_costs = saved_items[idx:idx + num_edge_arrays]; idx += num_edge_arrays
+        #     edge_labels = saved_items[idx:idx + num_edge_arrays:]; idx += num_edge_arrays
+        #     panoptic_ids_one_hot = None
+        #     if params['instance_preturbation']:
+        #         panoptic_ids_one_hot = saved_items[idx:]
+        #     lambda_val = params["lambda_val"]
+        #     epsilon_val = 1e-8
+        #     assert grad_node_labels.shape == node_costs.shape
+        #     assert grad_edge_labels is None or (grad_edge_labels[0].shape == edge_costs[0].shape and len(grad_edge_labels) == len(edge_costs))
 
-            if params['finite_diff_order'] == 1: 
-                node_labels_forward, _, edge_labels_forward, _ = solve_amc_batch(node_costs_forward, edge_costs_forward, edge_indices, params['edge_distances'], params['edge_sampling_intervals'])
-                grad_node_costs = (node_labels_forward - node_labels) / (lambda_val + epsilon_val)
-                grad_edge_costs = [(e_l_forward - e_l) / (lambda_val + epsilon_val) for (e_l_forward, e_l) in zip(edge_labels_forward, edge_labels)]
+        #     node_costs_forward = node_costs + lambda_val * grad_node_labels
+        #     edge_costs_forward = [e_c + lambda_val * g_e_l for (e_c, g_e_l) in zip(edge_costs, grad_edge_labels)]
+        #     edge_indices = ctx.edge_indices
 
-            elif params['finite_diff_order'] == 2:
-                batch_size = node_costs.shape[0]
-                node_costs_backward = node_costs - lambda_val * grad_node_labels
-                edge_costs_backward = [e_c - lambda_val * g_e_l for (e_c, g_e_l) in zip(edge_costs, grad_edge_labels)]
+        #     if params['finite_diff_order'] == 1: 
+        #         node_labels_forward, _, edge_labels_forward, _ = solve_amc_batch(node_costs_forward, edge_costs_forward, edge_indices, params['edge_distances'], params['edge_sampling_intervals'])
+        #         grad_node_costs = (node_labels_forward - node_labels) / (lambda_val + epsilon_val)
+        #         grad_edge_costs = [(e_l_forward - e_l) / (lambda_val + epsilon_val) for (e_l_forward, e_l) in zip(edge_labels_forward, edge_labels)]
 
-                node_costs_combined = torch.cat((node_costs_forward, node_costs_backward), 0)
-                edge_costs_combined = [torch.cat((ec_f, ec_b), 0) for (ec_f, ec_b) in zip(edge_costs_forward, edge_costs_backward)]
+        #     elif params['finite_diff_order'] == 2:
+        #         batch_size = node_costs.shape[0]
+        #         node_costs_backward = node_costs - lambda_val * grad_node_labels
+        #         edge_costs_backward = [e_c - lambda_val * g_e_l for (e_c, g_e_l) in zip(edge_costs, grad_edge_labels)]
 
-                node_labels_combined, _, edge_labels_combined, _ = solve_amc_batch(node_costs_combined, edge_costs_combined, edge_indices, params['edge_distances'], params['edge_sampling_intervals'])
+        #         node_costs_combined = torch.cat((node_costs_forward, node_costs_backward), 0)
+        #         edge_costs_combined = [torch.cat((ec_f, ec_b), 0) for (ec_f, ec_b) in zip(edge_costs_forward, edge_costs_backward)]
 
-                node_labels_forward = node_labels_combined[:batch_size, ::]
-                node_labels_backward = node_labels_combined[batch_size:, ::]
+        #         node_labels_combined, _, edge_labels_combined, _ = solve_amc_batch(node_costs_combined, edge_costs_combined, edge_indices, params['edge_distances'], params['edge_sampling_intervals'])
 
-                grad_node_costs = (node_labels_forward - node_labels_backward) / (2.0 * lambda_val + epsilon_val)
+        #         node_labels_forward = node_labels_combined[:batch_size, ::]
+        #         node_labels_backward = node_labels_combined[batch_size:, ::]
 
-                # edge_labels_forward = edge_labels_combined[:edge_costs_forward.shape[0], ::]
-                # edge_labels_backward = edge_labels_combined[edge_costs_forward.shape[0]:, ::]
-                # grad_edge_costs = (edge_labels_forward - edge_labels_backward) / (2.0 * lambda_val + epsilon_val)
-                grad_edge_costs = [(e_l_combined[:batch_size, ::] - e_l_combined[batch_size:, ::]) / (2.0 * lambda_val + epsilon_val) for e_l_combined in edge_labels_combined]
+        #         grad_node_costs = (node_labels_forward - node_labels_backward) / (2.0 * lambda_val + epsilon_val)
 
-            else:
-                assert False 
-        # Convert to tuple:
-        # print(f"nc: {grad_node_costs.abs().mean().item()}, ec: {grad_edge_costs[0].abs().mean().item()}, ")
+        #         # edge_labels_forward = edge_labels_combined[:edge_costs_forward.shape[0], ::]
+        #         # edge_labels_backward = edge_labels_combined[edge_costs_forward.shape[0]:, ::]
+        #         # grad_edge_costs = (edge_labels_forward - edge_labels_backward) / (2.0 * lambda_val + epsilon_val)
+        #         grad_edge_costs = [(e_l_combined[:batch_size, ::] - e_l_combined[batch_size:, ::]) / (2.0 * lambda_val + epsilon_val) for e_l_combined in edge_labels_combined]
+
+        #     else:
+        #         assert False 
+        # # Convert to tuple:
+        # # print(f"nc: {grad_node_costs.abs().mean().item()}, ec: {grad_edge_costs[0].abs().mean().item()}, ")
         out = (None, ) + (None, ) + (grad_node_costs, ) + tuple(grad_edge_costs)
     
         return out # None, None, grad_node_costs, grad_edge_costs, 
@@ -351,6 +364,7 @@ class AsymmetricMulticutModule(torch.nn.Module):
         if self.image_size is None or node_costs_batch[0, 0].shape != self.image_size:
             self.image_size = node_costs_batch[0, 0].shape
             self.edge_indices = get_edge_indices(self.image_size, self.edge_distances, self.edge_sampling_intervals)
+            self.params['edge_indices'] = self.edge_indices
         model_input = (self.edge_indices, ) + (self.params, ) + (node_costs_batch, ) + tuple(edge_costs_batch)
         out = self.solver.apply(*model_input)
         return out # Tuple
