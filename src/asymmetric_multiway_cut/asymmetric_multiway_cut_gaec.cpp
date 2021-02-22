@@ -95,8 +95,8 @@ namespace LPMP {
         double max_join_cost = -std::numeric_limits<double>::infinity();
         for(const auto& e : instance.edge_costs.edges())
         {
-            //const auto [join_cost, join_label] = compute_edge_cost(e.cost, e[0], e[1]);
-            const auto [join_cost, join_label] = compute_balanced_edge_cost(e.cost, e[0], e[1]);
+            const auto [join_cost, join_label] = compute_edge_cost(e.cost, e[0], e[1]);
+            // const auto [join_cost, join_label] = compute_balanced_edge_cost(e.cost, e[0], e[1]);
             min_join_cost = std::min(min_join_cost, join_cost);
             max_join_cost = std::max(max_join_cost, join_cost);
             assert(partition.find(e[0]) == e[0]);
@@ -150,15 +150,15 @@ namespace LPMP {
                     pp.cost += p.cost;
                     pp.stamp++;
 
-                    //const auto [join_cost, join_label] = compute_edge_cost(pp.cost, stable_node, head);
-                    const auto [join_cost, join_label] = compute_balanced_edge_cost(pp.cost, stable_node, head);
+                    const auto [join_cost, join_label] = compute_edge_cost(pp.cost, stable_node, head);
+                    // const auto [join_cost, join_label] = compute_balanced_edge_cost(pp.cost, stable_node, head);
                     if(join_cost <= 0.0)
                     {
                         Q.push(edge_type_q{stable_node, head, join_cost, join_label, pp.stamp});
                     }
                 } else {
-                    //const auto [join_cost, join_label] = compute_edge_cost(p.cost, stable_node, head);
-                    const auto [join_cost, join_label] = compute_balanced_edge_cost(p.cost, stable_node, head);
+                    const auto [join_cost, join_label] = compute_edge_cost(p.cost, stable_node, head);
+                    // const auto [join_cost, join_label] = compute_balanced_edge_cost(p.cost, stable_node, head);
                     if(join_cost <= 0.0)
                         Q.push(edge_type_q{stable_node, head, join_cost, join_label, 0});
                     insert_candidates.push_back({{stable_node, head}, {p.cost, 0}});
