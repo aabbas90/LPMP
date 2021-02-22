@@ -105,9 +105,9 @@ namespace LPMP {
                 Q.push(edge_type_q{e[0], e[1], join_cost, join_label, 0});
         }
 
-        std::cout << "min join cost initial = " << min_join_cost << "\n";
-        std::cout << "max join cost initial = " << max_join_cost << "\n";
-        std::cout << "size of Q = " << Q.size() << "\n";
+        // std::cout << "min join cost initial = " << min_join_cost << "\n";
+        // std::cout << "max join cost initial = " << max_join_cost << "\n";
+        // std::cout << "size of Q = " << Q.size() << "\n";
 
         while(!Q.empty()) {
             const edge_type_q e_q = Q.top();
@@ -188,8 +188,8 @@ namespace LPMP {
             const size_t c = partition.find(i);
             assert(node_labels[c] < nr_labels);
             labeling.node_labels.push_back(node_labels[c]);
+            labeling.node_connected_components_ids.push_back(c);
         }
-
         assert(instance.feasible(labeling));
         return labeling;
     }

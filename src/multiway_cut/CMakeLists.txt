@@ -13,3 +13,6 @@ target_link_libraries(multiway_cut_gaec multiway_cut_instance multiway_cut_gaec 
 pybind11_add_module(multiway_cut_py multiway_cut_python_binding.cpp)
 target_link_libraries(multiway_cut_py PRIVATE LPMP multiway_cut_instance multiway_cut_gaec)
 
+CONFIGURE_FILE(__init__.py ${CMAKE_CURRENT_BINARY_DIR}/__init__.py)
+CONFIGURE_FILE(setup.py ${CMAKE_CURRENT_BINARY_DIR}/setup.py)
+

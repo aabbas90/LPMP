@@ -12,3 +12,6 @@ target_link_libraries(asymmetric_multiway_cut_gaec_text_input asymmetric_multiwa
 
 pybind11_add_module(asymmetric_multiway_cut_py asymmetric_multiway_cut_python_binding.cpp)
 target_link_libraries(asymmetric_multiway_cut_py PRIVATE LPMP asymmetric_multiway_cut_instance asymmetric_multiway_cut_parser asymmetric_multiway_cut_gaec)
+
+CONFIGURE_FILE(__init__.py ${CMAKE_CURRENT_BINARY_DIR}/__init__.py)
+CONFIGURE_FILE(setup.py ${CMAKE_CURRENT_BINARY_DIR}/setup.py)

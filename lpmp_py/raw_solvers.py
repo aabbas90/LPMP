@@ -1,7 +1,24 @@
 import numpy as np
-import bindings.graph_matching_py as gm
-import bindings.multigraph_matching_py as mgm
+# import bindings.graph_matching_py as gm
+# import bindings.multigraph_matching_py as mgm
+# import bindings.multigraph_matching_py as mgm
+import bindings.asymmetric_multiway_cut_py as amwc
+import bindings.multiway_cut_py as mwc
 
+
+def amc_solver(node_costs, edge_list):
+    amc_instance = amwc.asymmetric_multiway_cut_instance(edge_list, node_costs)
+    amc_sol = amwc.asymmetric_multiway_cut_gaec(amc_instance)
+    edge_labels, node_labels, node_instance_ids = amc_instance.result_mask(amc_sol)
+    solver_cost = amc_instance.evaluate(amc_sol)
+    return node_labels, node_instance_ids, edge_labels, solver_cost
+
+def mc_solver(node_costs, edge_list):
+    mc_instance = mwc.multiway_cut_instance(edge_list, node_costs)
+    amc_sol = mwc.multiway_cut_gaec(mc_instance)
+    edge_labels, node_labels = mc_instance.result_mask(amc_sol)
+    solver_cost = mc_instance.evaluate(amc_sol)
+    return node_labels, edge_labels, solver_cost
 
 def gm_solver(costs, quadratic_costs, edges_left, edges_right, solver_params, verbose=False):
     """
