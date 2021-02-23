@@ -1,5 +1,5 @@
 import torch
-from ..raw_solvers import amc_solver
+from ..raw_solvers import amc_solver, mc_solver
 import numpy as np 
 import torch.multiprocessing as mp
 
@@ -44,7 +44,7 @@ def get_edge_indices(image_shape, edge_distances, edge_sampling_intervals):
 
     return edge_indices
 
-def solve(batch_index, node_costs_cpu, edge_costs_cpu, edge_indices, edge_distances, edge_sampling_intervals, compute_pan_one_hot, thing_ids, do_multiway, return_dict):
+def solve_amc(batch_index, node_costs_cpu, edge_costs_cpu, edge_indices, edge_distances, edge_sampling_intervals, compute_pan_one_hot, thing_ids, do_multiway, return_dict):
     edge_costs_cpu_1d = []
     edge_indices_1 = []
     edge_indices_2 = []
@@ -84,7 +84,7 @@ def solve(batch_index, node_costs_cpu, edge_costs_cpu, edge_indices, edge_distan
         node_labels, node_instance_ids, edge_labels_1d, solver_cost = amc_solver(node_costs_cpu, edge_list)
         node_instance_ids = node_instance_ids.reshape(node_labels_img_shape)
     else:
-        node_labels, edge_labels_1d, solver_cost = amc_solver(node_costs_cpu, edge_list)
+        node_labels, edge_labels_1d, solver_cost = mc_solver(node_costs_cpu, edge_list)
         node_instance_ids = None
 
     node_labels = node_labels.transpose().reshape((num_classes, node_labels_img_shape[0], node_labels_img_shape[1]))
@@ -140,7 +140,7 @@ def solve(batch_index, node_costs_cpu, edge_costs_cpu, edge_indices, edge_distan
 
     return_dict[batch_index] = (node_labels, node_instance_ids, edge_labels, panoptic_ids_one_hot)
 
-def solve_batch(node_costs_batch, edge_costs_batch, edge_indices, edge_distances, edge_sampling_intervals, do_multiway, thing_ids = None, compute_pan_one_hot = False):
+def solve_amc_batch(node_costs_batch, edge_costs_batch, edge_indices, edge_distances, edge_sampling_intervals, do_multiway, thing_ids = None, compute_pan_one_hot = False):
     panoptic_ids_one_hot = None
     if isinstance(node_costs_batch, torch.Tensor):
         node_costs_batch = torch.unbind(node_costs_batch, dim=0)
@@ -158,14 +158,14 @@ def solve_batch(node_costs_batch, edge_costs_batch, edge_indices, edge_distances
     if batch_size == 1:
         b = 0
         return_dict = {}
-        solve(b, node_costs_batch_cpu[b], edge_costs_batch_cpu[b], edge_indices, edge_distances, edge_sampling_intervals, compute_pan_one_hot, thing_ids, do_multiway, return_dict)
+        solve_amc(b, node_costs_batch_cpu[b], edge_costs_batch_cpu[b], edge_indices, edge_distances, edge_sampling_intervals, compute_pan_one_hot, thing_ids, do_multiway, return_dict)
     else:
         ctx = mp.get_context('fork')
         manager = ctx.Manager()
         return_dict = manager.dict()
         workers = []
         for b in range(batch_size):
-            worker = ctx.Process(target=solve, args=(b, node_costs_batch_cpu[b], edge_costs_batch_cpu[b], edge_indices, edge_distances, edge_sampling_intervals, compute_pan_one_hot, thing_ids, do_multiway, return_dict))
+            worker = ctx.Process(target=solve_amc, args=(b, node_costs_batch_cpu[b], edge_costs_batch_cpu[b], edge_indices, edge_distances, edge_sampling_intervals, compute_pan_one_hot, thing_ids, do_multiway, return_dict))
             workers.append(worker)
         [w.start() for w in workers]  
         for worker in workers:
@@ -216,7 +216,7 @@ class AsymmetricMultiCutSolver(torch.autograd.Function):
         node_costs = inputs[2]
         edge_costs = inputs[3:]
 
-        node_labels, node_instance_ids, edge_labels, panoptic_ids_one_hot = solve_batch(node_costs, edge_costs, edge_indices, params['edge_distances'], params['edge_sampling_intervals'], False, params['thing_ids'], params['instance_preturbation'])
+        node_labels, node_instance_ids, edge_labels, panoptic_ids_one_hot = solve_amc_batch(node_costs, edge_costs, edge_indices, params['edge_distances'], params['edge_sampling_intervals'], False, params['thing_ids'], params['instance_preturbation'])
         node_labels = torch.stack(node_labels, 0)
         ctx.params = params
         ctx.device = node_costs.device
