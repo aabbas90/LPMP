@@ -71,6 +71,7 @@ _, _, edge_only_costs = zip(*edge_costs)
 edge_only_costs = np.array(list(edge_only_costs))
 edge_costs_2d = get_edge_images(edge_only_costs)
 edge_labels_amc_2d = get_edge_images(edge_labels_amc)
+edge_labels_mc_2d = get_edge_images(edge_labels)
 
 # Visualization:
 fig, ((ax1, ax2, ax3), (ax4, ax5, ax6)) = plt.subplots(2, 3, sharex= True, sharey=True)
@@ -83,7 +84,7 @@ ax2.set_title('Node labels AMC')
 ax3.imshow(node_labels.argmax(0), cmap = 'tab20', interpolation='nearest')
 ax3.set_title('Node labels MC')
 
-ax4.imshow(get_colored_edge_image(-1.0 * edge_labels_amc_2d[0], -1.0 * edge_labels_amc_2d[1]), interpolation='nearest')
+ax4.imshow(get_colored_edge_image(-1.0 * edge_labels_mc_2d[0], -1.0 * edge_labels_mc_2d[1]), interpolation='nearest')
 ax4.set_title('Edge labels AMC, dist=1 (zoom-in req.)')
 
 ax5.imshow(edge_costs_2d[0], cmap = 'gray', interpolation='nearest', vmax = 10.0, vmin = -5.0)

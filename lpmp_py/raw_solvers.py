@@ -7,18 +7,31 @@ import bindings.multiway_cut_py as mwc
 
 
 def amc_solver(node_costs, edge_list):
+    # import pickle
+    # instance = {}
+    # instance['node_costs'] = node_costs
+    # instance['edge_costs'] = edge_list
+    # import string
+    # import random
+    # rand_str = lambda n: ''.join([random.choice(string.ascii_lowercase) for i in range(n)])
+    # rand_str = rand_str(10)
+    # file_dir = '/BS/ahmed_projects/work/data/multicut/non_partition_examples/'
+    # pickle.dump(instance, open(file_dir + rand_str + '.pkl', 'wb'))
+    # print(f"Written AMC instance :{rand_str + '.pkl'}")
+
     amc_instance = amwc.asymmetric_multiway_cut_instance(edge_list, node_costs)
     amc_sol = amwc.asymmetric_multiway_cut_gaec(amc_instance)
     edge_labels, node_labels, node_instance_ids = amc_instance.result_mask(amc_sol)
     solver_cost = amc_instance.evaluate(amc_sol)
-    return node_labels, node_instance_ids, edge_labels, solver_cost
+    return node_labels.astype(np.uint8), node_instance_ids.astype(np.int32), edge_labels.astype(np.uint8), solver_cost
+
 
 def mc_solver(node_costs, edge_list):
     mc_instance = mwc.multiway_cut_instance(edge_list, node_costs)
     amc_sol = mwc.multiway_cut_gaec(mc_instance)
     edge_labels, node_labels = mc_instance.result_mask(amc_sol)
     solver_cost = mc_instance.evaluate(amc_sol)
-    return node_labels, edge_labels, solver_cost
+    return node_labels.astype(np.uint8), edge_labels.astype(np.uint8), solver_cost
 
 def gm_solver(costs, quadratic_costs, edges_left, edges_right, solver_params, verbose=False):
     """
